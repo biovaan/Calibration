@@ -124,7 +124,8 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             plot = FALSE, trace = FALSE)
         mtry.tuned.raw <- tune.res[which.min(tune.res[, 2]), 1]
 
-		mdl.raw <- randomForest(Label ~., data = S1, mtry = mtry.tuned.raw)
+        # train the model, keep inbag info for oob calibration
+		mdl.raw <- randomForest(Label ~., data = S1, mtry = mtry.tuned.raw, keep.inbag = TRUE)
         })
 
     } else if (classifier == "NN") {
@@ -537,25 +538,44 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
     levels(pred.enir.DGG) <- levels(S2$Label) # make sure we have all levels in the predictions    
 
 
-    # compare the results!
+    # CASE 5: Platt scaling for SVM
+    if (classifier == "SVM") {
 
-    #cat(sprintf("%s\nAccuracy\nRaw: %.2f\n", classifier, 100 * sum(pred.raw == S2$Label) / nrow(S2)))
-    #cat(sprintf("ENIR: %.2f\n", 100 * sum(pred.enir == S2$Label) / nrow(S2)))
-    #cat(sprintf("ENIR full: %.2f\n", 100 * sum(pred.enir.full == S2$Label) / nrow(S2)))
-    #cat(sprintf("ENIR DG: %.2f\n", 100 * sum(pred.enir.DG == S2$Label) / nrow(S2)))
-    #cat(sprintf("ENIR DGG: %.2f\n", 100 * sum(pred.enir.DGG == S2$Label) / nrow(S2)))
+    }
 
-    #cat(sprintf("MSE\nRaw: %.3f\n", MSE(prob.raw, S2$Label)))
-    #cat(sprintf("ENIR: %.3f\n", MSE(prob.enir.cal, S2$Label)))
-    #cat(sprintf("ENIR full: %.3f\n", MSE(prob.enir.full.cal, S2$Label)))
-    #cat(sprintf("ENIR DG: %.3f\n", MSE(prob.enir.DG.cal, S2$Label)))
-    #cat(sprintf("ENIR DGG: %.3f\n", MSE(prob.enir.DGG.cal, S2$Label)))
+    # CASE 6: using out-of-bag samples for random forest ENIR calibration
+    if (classifier == "RF") {
+        # predict the training set with all individual trees so we can use the oob samples for calibration
+        pred.enir.oob <- predict(mdl.raw, S1, predict.all = TRUE)
 
-    #cat(sprintf("Logloss\nRaw: %.3f\n", MultiLogLoss(prob.raw, S2$Label)))
-    #cat(sprintf("ENIR: %.3f\n", MultiLogLoss(prob.enir.cal, S2$Label)))
-    #cat(sprintf("ENIR full: %.3f\n", MultiLogLoss(prob.enir.full.cal, S2$Label)))
-    #cat(sprintf("ENIR DG: %.3f\n", MultiLogLoss(prob.enir.DG.cal, S2$Label)))
-    #cat(sprintf("ENIR DGG: %.3f\n", MultiLogLoss(prob.enir.DGG.cal, S2$Label)))
+        # individual tree predictions are here: pred.enir.oob$individual
+        # and inbag info here (saved when training the model): mdl.raw$inbag
+        # calculate the fraction of trees predicting positive class for out-of-bag samples, i.e. predicted probability:
+        prob.enir.oob.tr <- rowSums(ifelse(mdl.raw$inbag > 0, 0,
+            ifelse(pred.enir.oob$individual == levels(S1$Label)[2], 1, 0))) / mdl.raw$oob.times
+
+        # tune the calibration model
+        t.ENIR.oob <- system.time({
+        mdl.enir.oob <- enir.build(prob.enir.oob.tr, pred.enir.oob$aggregate)
+        })
+
+        # predict the raw scores for the test set
+        prob.enir.oob.raw <- predict(mdl.raw, S2, type = "prob")[, 2]
+
+        # find the optimal threshold
+        pred.enir.tr.oob.cal <- data.frame(label = S1$Label,
+            score = enir.predict(mdl.enir.oob, predict(mdl.raw, S1, type = "prob")[, 2]))
+
+        threshold.enir.oob <- find.best.threshold(pred.enir.tr.oob.cal)
+
+        # calibrate the raw prediction scores
+        prob.enir.oob.cal <- enir.predict(mdl.enir.oob, prob.enir.oob.raw)
+        # predict the test set with using that threshold
+        pred.enir.oob <- ifelse(prob.enir.oob.cal > threshold.enir.oob, levels(S2$Label)[2], levels(S2$Label)[1])
+
+        levels(pred.enir.oob) <- levels(S2$Label) # make sure we have all levels in the predictions
+    }
+
 
     # combine the results into data frames that we can then write into csv files
     # append if the files exists so that we can run several simulation rounds
@@ -567,6 +587,9 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             CR.ENIR.full = 100 * sum(pred.enir.full == S2$Label) / nrow(S2),
             CR.DG = 100 * sum(pred.enir.DG == S2$Label) / nrow(S2),
             CR.DGG = 100 * sum(pred.enir.DGG == S2$Label) / nrow(S2))
+    if (classifier == "RF") {
+        df.acc <- cbind(df.acc, data.frame(CR.ENIR.oob = 100 * sum(pred.enir.oob == S2$Label) / nrow(S2)))
+    }
     if (control) {
         df.acc <- cbind(df.acc, data.frame(CR.BLR = 100 * sum(pred.BLR == S2$Label) / nrow(S2)))
     }
@@ -585,6 +608,9 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             MSE.ENIR.full = MSE(prob.enir.full.cal, S2$Label),
             MSE.DG = MSE(prob.enir.DG.cal, S2$Label),
             MSE.DGG = MSE(prob.enir.DGG.cal, S2$Label))
+    if (classifier == "RF") {
+        df.MSE <- cbind(df.MSE, data.frame(MSE.ENIR.oob = MSE(prob.enir.oob.cal, S2$Label)))
+    }
     if (control) {
         df.MSE <- cbind(df.MSE, data.frame(MSE.BLR = MSE(prob.BLR, S2$Label)))
     }
@@ -603,6 +629,9 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             logloss.ENIR.full = MultiLogLoss(prob.enir.full.cal, S2$Label),
             logloss.DG = MultiLogLoss(prob.enir.DG.cal, S2$Label),
             logloss.DGG = MultiLogLoss(prob.enir.DGG.cal, S2$Label))
+    if (classifier == "RF") {
+        df.logloss <- cbind(df.logloss, data.frame(logloss.ENIR.oob = MultiLogLoss(prob.enir.oob.cal, S2$Label)))
+    }
     if (control) {
         df.logloss <- cbind(df.logloss, data.frame(logloss.BLR = MultiLogLoss(prob.BLR, S2$Label)))
     }
@@ -624,6 +653,9 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             time.model.all = t.model.all[[3]],
             time.model = t.model[[3]]
             )
+    if (classifier == "RF") {
+        df.times <- cbind(df.times, data.frame(time.ENIR.oob = t.ENIR.oob[[3]]))
+    }
     if (control) {
         df.times <- cbind(df.times, data.frame(time.BLR = t.BLR[[3]]))
     }
