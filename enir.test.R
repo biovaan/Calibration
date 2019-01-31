@@ -540,7 +540,66 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
 
     # CASE 5: Platt scaling for SVM
     if (classifier == "SVM") {
+        # CASE 5a: use the separate calibration data set only
+        p <- predict(mdl, S1.calibration, probability = TRUE)
 
+        # find which column of the prediction scores is related to the positive class:
+		col.pos <- which(labels(attr(p, "probabilities"))[[2]] == levels(S1$Label)[2])
+
+        # tune the calibration model, a sigmoid function
+        prob.platt.tr <- data.frame(label = as.integer(S1.calibration$Label)-1, score = attr(p, "probabilities")[, col.pos])
+        t.platt <- system.time({
+            mdl.platt <- glm(label ~ score, prob.platt.tr, family=binomial)
+        })
+        
+        # predict the raw scores for the test set
+        p <- predict(mdl, S2, probability = TRUE)
+        prob.platt.raw <- attr(p, "probabilities")[, col.pos]
+
+        # find the optimal threshold
+        p <- predict(mdl, S1.training, probability = TRUE)
+        pred.platt.tr.cal <- data.frame(label = S1.training$Label,
+            score = predict(mdl.platt, data.frame(score = attr(p, "probabilities")[, col.pos]), type = "response"))
+
+        threshold.platt <- find.best.threshold(pred.platt.tr.cal)
+
+        # calibrate the raw prediction scores
+        prob.platt.cal <- predict(mdl.platt, data.frame(score = prob.platt.raw), type = "response")
+        # predict the test set with using that threshold
+        pred.platt <- ifelse(prob.platt.cal > threshold.platt, levels(S2$Label)[2], levels(S2$Label)[1])
+
+        levels(pred.platt) <- levels(S2$Label) # make sure we have all levels in the predictions
+        
+
+        # CASE 5b: use the whole training set for calibration
+        p <- predict(mdl.raw, S1, probability = TRUE)
+
+        # find which column of the prediction scores is related to the positive class:
+		col.pos <- which(labels(attr(p, "probabilities"))[[2]] == levels(S1$Label)[2])
+
+        # tune the calibration model, a sigmoid function
+        prob.platt.full.tr <- data.frame(label = as.integer(S1$Label)-1, score = attr(p, "probabilities")[, col.pos])
+        t.platt.full <- system.time({
+            mdl.platt.full <- glm(label ~ score, prob.platt.full.tr, family=binomial)
+        })
+        
+        # predict the raw scores for the test set
+        p <- predict(mdl.raw, S2, probability = TRUE)
+        prob.platt.full.raw <- attr(p, "probabilities")[, col.pos]
+
+        # find the optimal threshold
+        p <- predict(mdl.raw, S1, probability = TRUE)
+        pred.platt.full.tr.cal <- data.frame(label = S1$Label,
+            score = predict(mdl.platt.full, data.frame(score = attr(p, "probabilities")[, col.pos]), type = "response"))
+
+        threshold.platt.full <- find.best.threshold(pred.platt.full.tr.cal)
+
+        # calibrate the raw prediction scores
+        prob.platt.full.cal <- predict(mdl.platt.full, data.frame(score = prob.platt.full.raw), type = "response")
+        # predict the test set with using that threshold
+        pred.platt.full <- ifelse(prob.platt.full.cal > threshold.platt.full, levels(S2$Label)[2], levels(S2$Label)[1])
+
+        levels(pred.platt.full) <- levels(S2$Label) # make sure we have all levels in the predictions
     }
 
     # CASE 6: using out-of-bag samples for random forest ENIR calibration
@@ -563,10 +622,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
         prob.enir.oob.raw <- predict(mdl.raw, S2, type = "prob")[, 2]
 
         # find the optimal threshold
-        pred.enir.tr.oob.cal <- data.frame(label = S1$Label,
+        pred.enir.oob.tr.cal <- data.frame(label = S1$Label,
             score = enir.predict(mdl.enir.oob, predict(mdl.raw, S1, type = "prob")[, 2]))
 
-        threshold.enir.oob <- find.best.threshold(pred.enir.tr.oob.cal)
+        threshold.enir.oob <- find.best.threshold(pred.enir.oob.tr.cal)
 
         # calibrate the raw prediction scores
         prob.enir.oob.cal <- enir.predict(mdl.enir.oob, prob.enir.oob.raw)
@@ -590,6 +649,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
     if (classifier == "RF") {
         df.acc <- cbind(df.acc, data.frame(CR.ENIR.oob = 100 * sum(pred.enir.oob == S2$Label) / nrow(S2)))
     }
+    if (classifier == "SVM") {
+        df.acc <- cbind(df.acc, data.frame(CR.Platt = 100 * sum(pred.platt == S2$Label) / nrow(S2),
+            CR.Platt.full = 100 * sum(pred.platt.full == S2$Label) / nrow(S2)))
+    }
     if (control) {
         df.acc <- cbind(df.acc, data.frame(CR.BLR = 100 * sum(pred.BLR == S2$Label) / nrow(S2)))
     }
@@ -611,6 +674,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
     if (classifier == "RF") {
         df.MSE <- cbind(df.MSE, data.frame(MSE.ENIR.oob = MSE(prob.enir.oob.cal, S2$Label)))
     }
+    if (classifier == "SVM") {
+        df.MSE <- cbind(df.MSE, data.frame(MSE.Platt = MSE(prob.platt.cal, S2$Label),
+            MSE.Platt.full = MSE(prob.platt.full.cal, S2$Label)))
+    }
     if (control) {
         df.MSE <- cbind(df.MSE, data.frame(MSE.BLR = MSE(prob.BLR, S2$Label)))
     }
@@ -631,6 +698,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             logloss.DGG = MultiLogLoss(prob.enir.DGG.cal, S2$Label))
     if (classifier == "RF") {
         df.logloss <- cbind(df.logloss, data.frame(logloss.ENIR.oob = MultiLogLoss(prob.enir.oob.cal, S2$Label)))
+    }
+    if (classifier == "SVM") {
+        df.logloss <- cbind(df.logloss, data.frame(logloss.platt = MultiLogLoss(prob.platt.cal, S2$Label),
+            logloss.platt.full = MultiLogLoss(prob.platt.full.cal, S2$Label)))
     }
     if (control) {
         df.logloss <- cbind(df.logloss, data.frame(logloss.BLR = MultiLogLoss(prob.BLR, S2$Label)))
@@ -655,6 +726,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
             )
     if (classifier == "RF") {
         df.times <- cbind(df.times, data.frame(time.ENIR.oob = t.ENIR.oob[[3]]))
+    }
+    if (classifier == "SVM") {
+        df.times <- cbind(df.times, data.frame(time.platt = t.platt[[3]],
+            time.platt.full = t.platt.full[[3]]))
     }
     if (control) {
         df.times <- cbind(df.times, data.frame(time.BLR = t.BLR[[3]]))
