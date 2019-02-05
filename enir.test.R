@@ -1,6 +1,6 @@
 enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, seed = 20190124, Nsamples = 5000, bin.size = 100) {
     # run tests that test the usefulness of DG and DGG algorithms for small data set calibration
-    # input:  S1, S2: two-class data set split into two equal sized subsets, S1 and S2, where the last column is the label {0,1}
+    # input:  S1, S2: two-class data set split into two subsets, S1 and S2, where the last column is the label {0,1}
     #         name: a string to be used in the result filenames
     #         classifier: which classifier to use (implemented are NB, SVM, RF and NN)
     #         control: a boolean value indicating if BLR and GPR models should be run also as control cases
