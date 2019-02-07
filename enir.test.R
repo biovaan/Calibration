@@ -610,11 +610,11 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
         # individual tree predictions are here: pred.enir.oob$individual
         # and inbag info here (saved when training the model): mdl.raw$inbag
         # calculate the fraction of trees predicting positive class for out-of-bag samples, i.e. predicted probability:
+        t.ENIR.oob <- system.time({
         prob.enir.oob.tr <- rowSums(ifelse(mdl.raw$inbag > 0, 0,
             ifelse(pred.enir.oob$individual == levels(S1$Label)[2], 1, 0))) / mdl.raw$oob.times
 
         # tune the calibration model
-        t.ENIR.oob <- system.time({
         mdl.enir.oob <- enir.build(prob.enir.oob.tr, pred.enir.oob$aggregate)
         })
 
