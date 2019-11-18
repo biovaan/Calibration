@@ -547,7 +547,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
 		col.pos <- which(labels(attr(p, "probabilities"))[[2]] == levels(S1$Label)[2])
 
         # tune the calibration model, a sigmoid function
+        # use MAP estimates instead of hard labels like in Platt (1999)
         prob.platt.tr <- data.frame(label = as.integer(S1.calibration$Label)-1, score = attr(p, "probabilities")[, col.pos])
+        prob.platt.tr$label[prob.platt.tr$label == 1] <- (sum(prob.platt.tr$label == 1) + 1) / (sum(prob.platt.tr$label == 1) + 2)
+        prob.platt.tr$label[prob.platt.tr$label == 0] <- 1 / (sum(prob.platt.tr$label == 0) + 2)
         t.platt <- system.time({
             mdl.platt <- glm(label ~ score, prob.platt.tr, family=binomial)
         })
@@ -578,7 +581,10 @@ enir.mccv.test <- function(S1, S2, name, classifier = "NB", control = FALSE, see
 		col.pos <- which(labels(attr(p, "probabilities"))[[2]] == levels(S1$Label)[2])
 
         # tune the calibration model, a sigmoid function
+        # use MAP estimates instead of hard labels like in Platt (1999)
         prob.platt.full.tr <- data.frame(label = as.integer(S1$Label)-1, score = attr(p, "probabilities")[, col.pos])
+        prob.platt.full.tr$label[prob.platt.full.tr$label == 1] <- (sum(prob.platt.full.tr$label == 1) + 1) / (sum(prob.platt.full.tr$label == 1) + 2)
+        prob.platt.full.tr$label[prob.platt.full.tr$label == 0] <- 1 / (sum(prob.platt.full.tr$label == 0) + 2)
         t.platt.full <- system.time({
             mdl.platt.full <- glm(label ~ score, prob.platt.full.tr, family=binomial)
         })
