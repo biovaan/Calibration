@@ -41,9 +41,9 @@ test.calibration <- function(data.set, name, method = "CV") {
             S1[, ncol(S1)] <- ifelse(as.integer(S1[, ncol(S1)]) == 2, 1, -1)
             S2[, ncol(S2)] <- ifelse(as.integer(S2[, ncol(S2)]) == 2, 1, -1)
             filename <- paste(name, "_training_fold_", i, ".csv", sep = "")
-            write.table(S1, filename, dec = ".", sep = ",", row.names = FALSE, col.names = FALSE)
+            write.table(S1, filename, dec = ".", sep = ",", row.names = FALSE, col.names = FALSE, na = "")
             filename <- paste(name, "_test_fold_", i, ".csv", sep = "")
-            write.table(S2, filename, dec = ".", sep = ",", row.names = FALSE, col.names = FALSE)
+            write.table(S2, filename, dec = ".", sep = ",", row.names = FALSE, col.names = FALSE, na = "")
         }
     }
 
